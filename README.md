@@ -17,7 +17,7 @@ encrypted backup. Exploring the keychain is a first-class feature.
 - **Start flow** — detect a USB-connected device (via `libimobiledevice`) and run a full,
   always-encrypted backup, or open any local backup folder.
 - **Overview** — device metadata (model, iOS, serial, IMEI, phone number), file/domain/app counts.
-- **Keychain** 🔑 — decrypts and browses stored secrets (generic & internet passwords, keys,
+- **Keychain** — decrypts and browses stored secrets (generic & internet passwords, keys,
   certificates) with per-item reveal/copy and raw-attribute inspection.
 - **Timeline** — unified chronological view across messages, calls, photos, notes and Safari
   history, with type / date / text / contact filtering.
