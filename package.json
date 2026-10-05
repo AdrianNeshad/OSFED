@@ -1,0 +1,75 @@
+{
+  "name": "osfed",
+  "version": "0.1.0",
+  "description": "OSFED — Open Source Forensic Extraction Device. Cross-platform GUI for reading iPhone/iPad extractions from local backups or over cable.",
+  "main": "dist-electron/main.js",
+  "author": "OSFED",
+  "license": "MIT",
+  "scripts": {
+    "engine:build": "cd engine && go build -o bin/osfed-engine .",
+    "tools:mac": "bash scripts/vendor-tools-mac.sh",
+    "dev": "npm run engine:build && concurrently -k \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://127.0.0.1:5179 && electron .\"",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "build": "npm run engine:build && npm run build:renderer && npm run build:electron",
+    "preview": "vite preview",
+    "package": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.544.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "electron": "^30.1.0",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.5.2",
+    "vite": "^5.3.1",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.osfed.app",
+    "productName": "OSFED",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*.js"
+    ],
+    "extraResources": [
+      {
+        "from": "engine/bin",
+        "to": "engine"
+      },
+      {
+        "from": "engine/tools",
+        "to": "tools"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "identity": null,
+      "target": [
+        "zip"
+      ]
+    },
+    "win": {
+      "target": "portable"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    }
+  }
+}

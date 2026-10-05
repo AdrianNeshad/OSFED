@@ -1,0 +1,135 @@
+name: Release
+
+# Builds and publishes a new GitHub Release whenever the "version" field in
+# package.json changes on main. Bump it to 0.2.0, commit, push → release v0.2.0
+# with ready-to-run apps for macOS, Linux and Windows (no installers).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    name: Detect version change
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag v$VERSION already exists — nothing to release."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::New version v$VERSION — building release."
+          fi
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: guard
+    if: needs.guard.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Go engine
+        run: npm run engine:build
+
+      - name: Vendor device tools (macOS)
+        if: matrix.platform == 'mac'
+        run: |
+          brew install libimobiledevice dylibbundler
+          npm run tools:mac
+
+      - name: Vendor device tools (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libimobiledevice-utils usbmuxd patchelf
+          bash scripts/vendor-tools-linux.sh
+
+      - name: Keep only this platform's bundled tools
+        shell: bash
+        run: |
+          mkdir -p engine/tools
+          for d in engine/tools/*/; do
+            name=$(basename "$d")
+            case "$name" in
+              ${{ matrix.platform }}-*) echo "keeping $name" ;;
+              *) echo "pruning $name"; rm -rf "$d" ;;
+            esac
+          done
+
+      - name: Build renderer + electron
+        run: npm run build:renderer && npm run build:electron
+
+      - name: Package app
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --${{ matrix.platform }} --publish never
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: osfed-${{ matrix.platform }}
+          path: |
+            release/*.zip
+            release/*.AppImage
+            release/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [guard, build]
+    if: needs.guard.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Flatten artifacts
+        run: |
+          mkdir -p dist-apps
+          find artifacts -type f \( -name '*.zip' -o -name '*.AppImage' -o -name '*.exe' \) -exec cp {} dist-apps/ \;
+          ls -la dist-apps
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.guard.outputs.version }}
+          name: OSFED v${{ needs.guard.outputs.version }}
+          files: dist-apps/*
+          generate_release_notes: true
+          make_latest: true

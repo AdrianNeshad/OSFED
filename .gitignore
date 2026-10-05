@@ -1,0 +1,19 @@
+# Node
+node_modules/
+dist/
+dist-electron/
+release/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Go engine build output
+engine/bin/
+
+# Logs / OS
+*.log
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
