@@ -1,6 +1,6 @@
-# OSFED
+# OSFED - Open Source Forensics Extraction Device
 
-**Open Source Forensic Extraction Device** — a cross-platform (Windows / macOS / Linux) GUI
+A cross-platform (Windows / macOS / Linux) GUI
 for reading iPhone/iPad extractions, either from an existing local backup folder or by
 creating a fresh **encrypted** backup over a USB cable.
 
