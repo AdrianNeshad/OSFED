@@ -12,6 +12,8 @@ encrypted backup. Exploring the keychain is a first-class feature.
 
 ---
 
+<img width="1325" height="850" alt="Screenshot 2026-10-06 at 21 04 36" src="https://github.com/user-attachments/assets/ff309425-28e3-47b8-9578-49be63b43b1e" />
+
 ## What it does (current milestone)
 
 - **Start flow** — detect a USB-connected device (via `libimobiledevice`) and run a full,
