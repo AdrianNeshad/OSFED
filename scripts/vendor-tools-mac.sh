@@ -13,6 +13,10 @@
 set -euo pipefail
 
 TOOLS=(idevice_id ideviceinfo idevicepair idevicebackup2)
+# Optional tools: bundled when present on the build machine, skipped otherwise.
+# afcclient (ships with libimobiledevice) enables advanced-logical acquisition
+# over AFC, e.g. pulling the full camera roll (/DCIM) from the media partition.
+OPTIONAL_TOOLS=(afcclient)
 ARCH="$(uname -m)"            # arm64 or x86_64
 PLAT="mac-${ARCH}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,6 +34,18 @@ for t in "${TOOLS[@]}"; do
   if [[ ! -e "${src}" ]]; then
     echo "ERROR: ${src} not found — run: brew install libimobiledevice" >&2
     exit 1
+  fi
+  cp -L "${src}" "${DEST}/bin/${t}"
+  chmod +w "${DEST}/bin/${t}"
+  XARGS+=(-x "${DEST}/bin/${t}")
+done
+
+# Optional tools: include when available, warn (don't fail) when missing.
+for t in "${OPTIONAL_TOOLS[@]}"; do
+  src="${BREW_PREFIX}/bin/${t}"
+  if [[ ! -e "${src}" ]]; then
+    echo "WARN: optional tool ${t} not found — skipping (ships with libimobiledevice)" >&2
+    continue
   fi
   cp -L "${src}" "${DEST}/bin/${t}"
   chmod +w "${DEST}/bin/${t}"

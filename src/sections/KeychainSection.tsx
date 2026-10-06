@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  KeyRound, Search, Eye, EyeOff, Copy, Check, Globe, Lock, FileText, Shield, X, Download,
+  KeyRound, Search, Eye, EyeOff, Copy, Check, Globe, Lock, FileText, Shield, X, Download, Layers,
 } from 'lucide-react';
 import { Spinner, EmptyState, Badge, Button } from '../components/ui';
 import { engineCall } from '../lib/ipc';
 import type { KeychainDump, KeychainEntry, KeychainClass, KeychainSecret } from '../lib/types';
+
+type Tab = KeychainClass | 'all';
 
 const CLASS_META: { id: KeychainClass; label: string; icon: any }[] = [
   { id: 'general', label: 'Generic', icon: KeyRound },
@@ -23,7 +25,7 @@ export default function KeychainSection({ handle }: { handle: string }) {
   const [dump, setDump] = useState<KeychainDump | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [cls, setCls] = useState<KeychainClass>('general');
+  const [cls, setCls] = useState<Tab>('all');
   const [query, setQuery] = useState('');
   const [revealAll, setRevealAll] = useState(false);
   const [selected, setSelected] = useState<KeychainEntry | null>(null);
@@ -36,21 +38,25 @@ export default function KeychainSection({ handle }: { handle: string }) {
     engineCall<KeychainDump>('dump_keychain', { handle })
       .then((d) => {
         setDump(d);
-        // Auto-select the first non-empty class.
-        const first = CLASS_META.find((c) => (d.counts[c.id] || 0) > 0);
-        if (first) setCls(first.id);
+        setCls('all');
       })
       .catch((e) => setError(e.message || String(e)))
       .finally(() => setLoading(false));
   }, [handle]);
 
-  const entries = dump ? dump[cls] : [];
+  const entries: { entry: KeychainEntry; cls: KeychainClass }[] = useMemo(() => {
+    if (!dump) return [];
+    if (cls === 'all') {
+      return CLASS_META.flatMap((c) => dump[c.id].map((entry) => ({ entry, cls: c.id })));
+    }
+    return dump[cls].map((entry) => ({ entry, cls }));
+  }, [dump, cls]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return entries;
-    return entries.filter((e) => {
-      const s = e.summary;
+    return entries.filter(({ entry }) => {
+      const s = entry.summary;
       return [s.account, s.service, s.label, s.server, s.accessGroup, secretText(s.secret)]
         .filter(Boolean)
         .join(' ')
@@ -95,6 +101,16 @@ export default function KeychainSection({ handle }: { handle: string }) {
 
         {/* class tabs */}
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => { setCls('all'); setSelected(null); }}
+            className={[
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] transition-colors',
+              cls === 'all' ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-elevated',
+            ].join(' ')}
+          >
+            <Layers size={14} /> All
+            <span className="text-caption opacity-70">{total}</span>
+          </button>
           {CLASS_META.map((c) => {
             const count = dump?.counts[c.id] || 0;
             const Icon = c.icon;
@@ -136,7 +152,8 @@ export default function KeychainSection({ handle }: { handle: string }) {
             <table className="w-full text-[13px]">
               <thead className="sticky top-0 bg-base/95 backdrop-blur border-b border-border-subtle text-caption text-text-tertiary uppercase tracking-wide">
                 <tr>
-                  <th className="text-left font-medium px-6 py-2">{cls === 'internet' ? 'Server' : 'Service'}</th>
+                  {cls === 'all' && <th className="text-left font-medium px-6 py-2">Type</th>}
+                  <th className={`text-left font-medium py-2 ${cls === 'all' ? 'px-3' : 'px-6'}`}>{cls === 'internet' ? 'Server' : cls === 'all' ? 'Service / Server' : 'Service'}</th>
                   <th className="text-left font-medium px-3 py-2">Account</th>
                   <th className="text-left font-medium px-3 py-2">Secret</th>
                   <th className="text-left font-medium px-3 py-2">Access group</th>
@@ -144,7 +161,7 @@ export default function KeychainSection({ handle }: { handle: string }) {
               </thead>
               <tbody>
                 {filtered.map((e, i) => (
-                  <KeychainRow key={i} entry={e} cls={cls} reveal={revealAll} onClick={() => setSelected(e)} selected={selected === e} />
+                  <KeychainRow key={i} entry={e.entry} cls={e.cls} showType={cls === 'all'} reveal={revealAll} onClick={() => setSelected(e.entry)} selected={selected === e.entry} />
                 ))}
               </tbody>
             </table>
@@ -158,22 +175,31 @@ export default function KeychainSection({ handle }: { handle: string }) {
 }
 
 function KeychainRow({
-  entry, cls, reveal, onClick, selected,
+  entry, cls, showType, reveal, onClick, selected,
 }: {
-  entry: KeychainEntry; cls: KeychainClass; reveal: boolean; onClick: () => void; selected: boolean;
+  entry: KeychainEntry; cls: KeychainClass; showType?: boolean; reveal: boolean; onClick: () => void; selected: boolean;
 }) {
   const [show, setShow] = useState(false);
   const s = entry.summary;
   const primary = cls === 'internet' ? (s.server || s.service) : (s.service || s.label);
   const secret = secretText(s.secret);
   const visible = reveal || show;
+  const meta = CLASS_META.find((c) => c.id === cls);
+  const TypeIcon = meta?.icon || KeyRound;
 
   return (
     <tr
       onClick={onClick}
       className={`border-b border-border-subtle cursor-pointer ${selected ? 'bg-accent/10' : 'hover:bg-elevated/60'}`}
     >
-      <td className="px-6 py-2.5 max-w-[220px] truncate">{primary || <span className="text-text-tertiary">—</span>}</td>
+      {showType && (
+        <td className="px-6 py-2.5 max-w-[140px]">
+          <span className="flex items-center gap-1.5 text-text-secondary">
+            <TypeIcon size={13} className="text-text-tertiary shrink-0" /> {meta?.label || cls}
+          </span>
+        </td>
+      )}
+      <td className={`py-2.5 max-w-[220px] truncate ${showType ? 'px-3' : 'px-6'}`}>{primary || <span className="text-text-tertiary">—</span>}</td>
       <td className="px-3 py-2.5 max-w-[180px] truncate">{s.account || <span className="text-text-tertiary">—</span>}</td>
       <td className="px-3 py-2.5 max-w-[240px]">
         {secret ? (

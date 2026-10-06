@@ -15,16 +15,23 @@ encrypted backup. Exploring the keychain is a first-class feature.
 ## What it does (current milestone)
 
 - **Start flow** — detect a USB-connected device (via `libimobiledevice`) and run a full,
-  always-encrypted backup, or open any local backup folder.
+  always-encrypted backup, or open any local backup folder. Each detected device shows its
+  name, iOS version, UDID and a **chip (SoC) badge** identifying its Apple processor.
+- **Advanced-logical acquisition** — pull the full **camera roll** (`/DCIM`) straight off the
+  device's media partition over AFC (Apple File Conduit) — the original photo/video files,
+  more complete than a backup, with no jailbreak or exploit. Result is revealed in the file
+  manager when done.
 - **Overview** — device metadata (model, iOS, serial, IMEI, phone number), file/domain/app counts.
 - **Keychain** — decrypts and browses stored secrets (generic & internet passwords, keys,
   certificates) with per-item reveal/copy and raw-attribute inspection.
 - **Timeline** — unified chronological view across messages, calls, photos, notes and Safari
   history, with type / date / text / contact filtering.
-- **Data views** — Messages (chat bubbles), Call Log, Contacts, Notes, Safari History, Photos
-  (metadata), Apps.
-- **File Browser** — browse every file by domain and restore a domain (or the whole backup)
-  to a folder.
+- **Data views** — Messages (chat bubbles), Call Log, Contacts, Notes, Safari History, Photos,
+  Apps. The Photos grid renders real **lazy-loaded thumbnails** (decoded in the engine), and any
+  photo or file **opens in the OS viewer** — so HEIC, video and PDF that can't render inline
+  still open in one click.
+- **File Browser** — browse every file by domain, **open** any file in the OS viewer, and
+  restore a domain (or the whole backup) to a folder.
 
 ## Architecture
 
@@ -44,15 +51,19 @@ React + Vite + TypeScript renderer (src/)  — Phosphor-style grouped sidebar UI
   and keychain decryption, plus SQLite extractors for the content views.
 - **Device backup**: the `libimobiledevice` CLI tools (`idevicebackup2`, `idevice_id`,
   `ideviceinfo`, `idevicepair`).
+- **Device I/O stays in the Electron/CLI layer** (the Go engine only parses already-captured
+  data): chip identification (`electron/devicecaps.ts`, ProductType → SoC) and the AFC
+  camera-roll pull (`electron/afc.ts`, driving the bundled `afcclient`).
 
 ## Plug-and-play
 
 The shipped app needs **nothing installed** to open backups, browse the keychain, view
 the timeline, or parse content — the Go engine is a self-contained binary bundled in the app.
 
-For **creating a backup from a connected device**, the libimobiledevice tools are bundled
-*inside* the app too (macOS: binaries + their libraries, relinked to be self-contained), so
-end users install nothing. Platform notes:
+For **creating a backup from a connected device** (and the AFC camera-roll pull), the
+libimobiledevice tools — including `afcclient` — are bundled *inside* the app too (macOS:
+binaries + their libraries, relinked to be self-contained), so end users install nothing.
+Platform notes:
 
 - **macOS** — fully plug-and-play. USB talks to the system `usbmuxd` that ships with macOS.
 - **Windows** — still requires Apple's **Apple Devices** app (or iTunes) for the USB driver

@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Smartphone, HardDriveDownload, FolderOpen, RefreshCw, ShieldCheck,
-  AlertTriangle, Wand2, Lock, CheckCircle2, XCircle, FolderSearch,
+  AlertTriangle, Wand2, Lock, CheckCircle2, XCircle, FolderSearch, Cpu, Images,
 } from 'lucide-react';
 import { Button, Card, Spinner, Badge, formatBytes } from '../components/ui';
 import { engineCall } from '../lib/ipc';
 import type { BackupInfo, BackupSummary, EnumerateResult } from '../lib/types';
-import type { DeviceInfo, ToolStatus } from '../global';
+import type { DeviceInfo, ToolStatus, AfcStatus } from '../global';
 
 interface Props {
   backup: BackupInfo | null;
@@ -14,7 +14,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Phase = 'idle' | 'backing-up' | 'opening';
+type Phase = 'idle' | 'backing-up' | 'opening' | 'afc';
 
 export default function StartSection({ onOpened }: Props) {
   const [tools, setTools] = useState<ToolStatus | null>(null);
@@ -29,8 +29,17 @@ export default function StartSection({ onOpened }: Props) {
   const [status, setStatus] = useState('');
   const [log, setLog] = useState<string[]>([]);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const [afc, setAfc] = useState<AfcStatus | null>(null);
+  // UDID currently being paired, so its row shows a spinner and disables actions.
+  const [pairing, setPairing] = useState<string | null>(null);
 
   const logRef = useRef<HTMLDivElement>(null);
+  // Keep the latest phase readable from the long-lived devices-changed listener
+  // without re-subscribing on every phase change.
+  const phaseRef = useRef<Phase>('idle');
+  phaseRef.current = phase;
 
   // ── setup ──────────────────────────────────────────────────────────────
   const refreshDevices = useCallback(async () => {
@@ -53,18 +62,31 @@ export default function StartSection({ onOpened }: Props) {
   useEffect(() => {
     window.osfed.checkTools().then(setTools);
     window.osfed.defaultBackupTarget().then(setTargetDir);
+    window.osfed.afcStatus().then(setAfc);
     refreshDevices();
   }, [refreshDevices]);
 
+  // Auto-refresh when a device is plugged in or unplugged (the main process
+  // watches the connected device set), so no manual Refresh is needed. Skip
+  // while a backup/pull is running so we don't poke the device mid-transfer.
   useEffect(() => {
-    const unsub = window.osfed.onBackupEvent((ev) => {
+    const unsub = window.osfed.onDevicesChanged(() => {
+      if (phaseRef.current === 'idle') refreshDevices();
+    });
+    return unsub;
+  }, [refreshDevices]);
+
+  useEffect(() => {
+    const handle = (ev: any) => {
       if (ev.kind === 'log') setLog((l) => [...l.slice(-400), ev.line]);
       else {
         if (ev.pct >= 0) setProgress(ev.pct);
         if (ev.status) setStatus(ev.status);
       }
-    });
-    return unsub;
+    };
+    const unsubB = window.osfed.onBackupEvent(handle);
+    const unsubA = window.osfed.onAfcEvent(handle);
+    return () => { unsubB(); unsubA(); };
   }, []);
 
   useEffect(() => {
@@ -86,8 +108,38 @@ export default function StartSection({ onOpened }: Props) {
     if (dir) setTargetDir(dir);
   };
 
+  // Pair the host with the device. This is what makes iOS show the on-screen
+  // "Trust" dialog — the backup itself never prompts, so the user must trust
+  // the computer here first. On a fresh device the first tap triggers the
+  // dialog (pending_trust); after they accept, a second tap completes it.
+  const pairDevice = async (dev: DeviceInfo) => {
+    setError('');
+    setNotice('');
+    setPairing(dev.udid);
+    try {
+      const r = await window.osfed.pair(dev.udid);
+      if (r.ok) {
+        setNotice('Device trusted. You can start the backup now.');
+        await refreshDevices();
+      } else if (r.code === 'pending_trust') {
+        setError('Unlock your device, then tap “Trust” on its screen and enter its passcode. Then tap Pair again.');
+      } else if (r.code === 'passcode') {
+        setError('Unlock your device and confirm on its screen, then tap Pair again.');
+      } else if (r.code === 'no_device') {
+        setError('No device found. Reconnect it with a data cable (not charge-only) and unlock it.');
+      } else {
+        setError(r.message || 'Pairing failed. Reconnect the device and try again.');
+      }
+    } catch (e: any) {
+      setError(e.message || String(e));
+    } finally {
+      setPairing(null);
+    }
+  };
+
   const startBackup = async (dev: DeviceInfo) => {
     setError('');
+    if (!dev.paired) { setError('Trust this computer on the device first — tap Pair, then accept the dialog on the device.'); return; }
     if (!password) { setError('Set a backup password first (the keychain is only recoverable from an encrypted backup).'); return; }
     if (!targetDir) { setError('Choose a destination folder.'); return; }
     setPhase('backing-up');
@@ -118,6 +170,37 @@ export default function StartSection({ onOpened }: Props) {
     setStatus('Cancelled');
   };
 
+  // Advanced logical: pull the full camera roll (/DCIM) over AFC.
+  const startCameraRoll = async (dev: DeviceInfo) => {
+    setError('');
+    setNotice('');
+    const destDir = await window.osfed.afcDefaultMediaTarget(dev.udid);
+    setPhase('afc');
+    setProgress(0);
+    setStatus('Preparing…');
+    setLog([]);
+    try {
+      const res = await window.osfed.pullDCIM({ udid: dev.udid, destDir });
+      if (!res.success || !res.data?.success) {
+        setError(res.error || res.data?.message || 'Camera roll pull failed.');
+        setPhase('idle');
+        return;
+      }
+      setPhase('idle');
+      setNotice(`Pulled ${res.data.files.toLocaleString()} camera-roll files (${formatBytes(res.data.bytes)}) to ${res.data.destDir}.`);
+      window.osfed.openPath(res.data.destDir);
+    } catch (e: any) {
+      setError(e.message || String(e));
+      setPhase('idle');
+    }
+  };
+
+  const cancelPull = async () => {
+    await window.osfed.cancelPull();
+    setPhase('idle');
+    setStatus('Cancelled');
+  };
+
   const libmissing = tools && !tools.available;
 
   return (
@@ -135,7 +218,7 @@ export default function StartSection({ onOpened }: Props) {
         </p>
 
         {phase !== 'idle' ? (
-          <BackupProgress phase={phase} progress={progress} status={status} log={log} logRef={logRef} onCancel={cancelBackup} />
+          <BackupProgress phase={phase} progress={progress} status={status} log={log} logRef={logRef} onCancel={phase === 'afc' ? cancelPull : cancelBackup} />
         ) : (
           <div className="space-y-6">
             {/* libimobiledevice status */}
@@ -162,6 +245,15 @@ export default function StartSection({ onOpened }: Props) {
                 <div className="flex items-start gap-3 text-[13px]">
                   <XCircle size={18} className="text-error mt-0.5" />
                   <div className="text-text-secondary whitespace-pre-wrap">{error}</div>
+                </div>
+              </Card>
+            )}
+
+            {notice && (
+              <Card className="p-4 border-success/30">
+                <div className="flex items-start gap-3 text-[13px]">
+                  <CheckCircle2 size={18} className="text-success mt-0.5" />
+                  <div className="text-text-secondary whitespace-pre-wrap">{notice}</div>
                 </div>
               </Card>
             )}
@@ -234,8 +326,36 @@ export default function StartSection({ onOpened }: Props) {
                           {d.productType || 'iOS device'} · iOS {d.productVersion || '?'} · {d.udid}
                         </div>
                       </div>
-                      {d.paired ? <Badge tone="success">Paired</Badge> : <Badge tone="warning">Tap Trust</Badge>}
-                      <Button variant="primary" onClick={() => startBackup(d)}>
+                      {d.soc && d.soc !== 'unknown' && (
+                        <Badge tone="default"><Cpu size={10} className="mr-1" />{d.socLabel}</Badge>
+                      )}
+                      {d.paired ? <Badge tone="success">Paired</Badge> : <Badge tone="warning">Not trusted</Badge>}
+                      {!d.paired && (
+                        <Button
+                          variant="default"
+                          onClick={() => pairDevice(d)}
+                          disabled={pairing === d.udid}
+                          title="Trust this computer — shows the Trust dialog on the device"
+                        >
+                          {pairing === d.udid ? <Spinner /> : <ShieldCheck size={14} />} Pair
+                        </Button>
+                      )}
+                      {afc?.available && (
+                        <Button
+                          variant="default"
+                          onClick={() => startCameraRoll(d)}
+                          disabled={!d.paired}
+                          title={d.paired ? 'Pull the full camera roll (/DCIM) over AFC' : 'Trust this computer on the device first'}
+                        >
+                          <Images size={14} /> Camera roll
+                        </Button>
+                      )}
+                      <Button
+                        variant="primary"
+                        onClick={() => startBackup(d)}
+                        disabled={!d.paired}
+                        title={d.paired ? 'Create a full encrypted backup' : 'Tap Pair and trust this computer on the device first'}
+                      >
                         <Lock size={14} /> Back up
                       </Button>
                     </div>
@@ -261,25 +381,34 @@ function BackupProgress({
   phase: Phase; progress: number; status: string; log: string[];
   logRef: React.RefObject<HTMLDivElement>; onCancel: () => void;
 }) {
+  // The AFC camera-roll pull reports a live file count rather than a percentage,
+  // so its bar is indeterminate.
+  const indeterminate = phase === 'afc' && progress < 100;
+  const title =
+    phase === 'opening' ? 'Opening backup…' :
+    phase === 'afc' ? 'Pulling camera roll (AFC)…' :
+    'Creating encrypted backup…';
   return (
     <Card className="p-6">
       <div className="flex items-center gap-2 mb-4">
         <Spinner />
-        <h2 className="text-subhead font-semibold">
-          {phase === 'opening' ? 'Opening backup…' : 'Creating encrypted backup…'}
-        </h2>
+        <h2 className="text-subhead font-semibold">{title}</h2>
       </div>
       <div className="h-2 rounded-full bg-elevated overflow-hidden mb-2">
-        <div className="h-full bg-accent transition-all duration-300" style={{ width: `${Math.max(2, progress)}%` }} />
+        {indeterminate ? (
+          <div className="h-full w-1/3 bg-accent/60 animate-pulse rounded-full" />
+        ) : (
+          <div className="h-full bg-accent transition-all duration-300" style={{ width: `${Math.max(2, progress)}%` }} />
+        )}
       </div>
       <div className="flex items-center justify-between text-caption text-text-tertiary mb-4">
         <span>{status || 'Working…'}</span>
-        <span className="mono">{progress}%</span>
+        {!indeterminate && <span className="mono">{progress}%</span>}
       </div>
       <div ref={logRef} className="mono text-caption text-text-tertiary bg-base rounded-md border border-border-subtle p-3 h-40 overflow-y-auto whitespace-pre-wrap">
         {log.length === 0 ? 'Keep your device unlocked. You may need to confirm on the device screen.' : log.join('\n')}
       </div>
-      {phase === 'backing-up' && (
+      {(phase === 'backing-up' || phase === 'afc') && (
         <div className="mt-4">
           <Button variant="danger" onClick={onCancel}>Cancel</Button>
         </div>

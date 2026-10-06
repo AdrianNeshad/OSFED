@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FolderTree, Search, Download, Database, Check } from 'lucide-react';
+import { FolderTree, Search, Download, Database, Check, ExternalLink } from 'lucide-react';
 import { Spinner, EmptyState, Button, formatBytes, Badge } from '../components/ui';
 import { engineCall } from '../lib/ipc';
 import type { DomainInfo, FileRecord } from '../lib/types';
@@ -23,6 +23,7 @@ export default function FilesSection({ handle }: { handle: string }) {
   const [selected, setSelected] = useState<FileRecord | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     setLoadingDomains(true);
@@ -43,6 +44,21 @@ export default function FilesSection({ handle }: { handle: string }) {
     const q = domFilter.trim().toLowerCase();
     return q ? domains.filter((d) => d.domain.toLowerCase().includes(q)) : domains;
   }, [domains, domFilter]);
+
+  const openSelected = async () => {
+    if (!selected) return;
+    setOpening(true);
+    try {
+      const r = await engineCall<{ path: string }>('export_to_temp', {
+        handle, id: selected.id, domain: selected.domain, path: selected.path,
+      });
+      await window.osfed.openPath(r.path);
+    } catch (e: any) {
+      alert(`Open failed: ${e.message || e}`);
+    } finally {
+      setOpening(false);
+    }
+  };
 
   const download = async () => {
     if (!selected) return;
@@ -71,9 +87,14 @@ export default function FilesSection({ handle }: { handle: string }) {
           <h1 className="text-title font-semibold">File Browser</h1>
           <Badge tone="default">{total.toLocaleString()} files</Badge>
         </div>
-        <Button variant="primary" onClick={download} disabled={!selected || downloading}>
-          {downloading ? <Spinner /> : justSaved ? <><Check size={14} /> Saved</> : <><Download size={14} /> Download file</>}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="default" onClick={openSelected} disabled={!selected || opening}>
+            {opening ? <Spinner /> : <><ExternalLink size={14} /> Open</>}
+          </Button>
+          <Button variant="primary" onClick={download} disabled={!selected || downloading}>
+            {downloading ? <Spinner /> : justSaved ? <><Check size={14} /> Saved</> : <><Download size={14} /> Download file</>}
+          </Button>
+        </div>
       </div>
 
       {/* selected-file hint */}

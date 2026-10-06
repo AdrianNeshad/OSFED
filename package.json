@@ -1,6 +1,6 @@
 {
   "name": "osfed",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OSFED — Open Source Forensic Extraction Device. Cross-platform GUI for reading iPhone/iPad extractions from local backups or over cable.",
   "main": "dist-electron/main.js",
   "author": "OSFED",
@@ -43,6 +43,7 @@
     "directories": {
       "output": "release"
     },
+    "afterPack": "scripts/afterPack.js",
     "files": [
       "dist/**/*",
       "dist-electron/**/*.js"

@@ -42,6 +42,7 @@ export interface SectionDef {
 export const SECTIONS: SectionDef[] = [
   { id: 'start', label: 'Start', icon: Smartphone, group: 'Device', needsBackup: false },
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, group: 'Device', needsBackup: true },
+  { id: 'files', label: 'File Browser', icon: FolderTree, group: 'Device', needsBackup: true },
 
   { id: 'timeline', label: 'Timeline', icon: Clock, group: 'Analysis', needsBackup: true },
   { id: 'keychain', label: 'Keychain', icon: KeyRound, group: 'Analysis', needsBackup: true },
@@ -53,8 +54,6 @@ export const SECTIONS: SectionDef[] = [
   { id: 'notes', label: 'Notes', icon: StickyNote, group: 'Data', needsBackup: true },
   { id: 'safari', label: 'Safari', icon: Compass, group: 'Data', needsBackup: true },
   { id: 'apps', label: 'Apps', icon: Grid3x3, group: 'Data', needsBackup: true },
-
-  { id: 'files', label: 'File Browser', icon: FolderTree, group: 'Tools', needsBackup: true },
 ];
 
 export const GROUP_ORDER: SectionGroup[] = ['Device', 'Analysis', 'Data', 'Tools'];

@@ -4,6 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+import { classifySoc, socLabel } from './devicecaps';
+import type { SocFamily } from './devicecaps';
+
 /**
  * Wrapper around the libimobiledevice command-line tools (idevice_id,
  * ideviceinfo, idevicepair, idevicebackup2). OSFED's start flow drives a full,
@@ -78,6 +81,13 @@ function findTool(name: string): string | null {
   return null;
 }
 
+// resolveTool exposes the same discovery used for the backup tools (bundled
+// dir first, then PATH / common locations) to sibling modules such as the AFC
+// media puller looking up `afcclient`.
+export function resolveTool(name: string): string | null {
+  return findTool(name);
+}
+
 export interface ToolStatus {
   available: boolean;
   tools: Record<ToolName, string | null>;
@@ -116,6 +126,24 @@ export interface DeviceInfo {
   productVersion: string;
   productType: string;
   paired: boolean;
+  /** Apple SoC family inferred from the model (the device's chip). */
+  soc: SocFamily;
+  /** Friendly chip name for display, e.g. "A11 Bionic". */
+  socLabel: string;
+}
+
+/**
+ * Cheap poll of just the connected UDIDs (`idevice_id -l`), used by the device
+ * watcher to notice plug/unplug without the per-device ideviceinfo/idevicepair
+ * round-trips that listDevices() does. Returns an empty array when the tools are
+ * missing or usbmuxd is unreachable, so the watcher treats that as "no device"
+ * rather than throwing.
+ */
+export async function listUdids(): Promise<string[]> {
+  const st = checkTools();
+  if (!st.tools.idevice_id) return [];
+  const { stdout } = await run(st.tools.idevice_id, ['-l'], 8000);
+  return stdout.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
 /** List USB-connected devices and best-effort metadata. */
@@ -128,7 +156,10 @@ export async function listDevices(): Promise<DeviceInfo[]> {
 
   const devices: DeviceInfo[] = [];
   for (const udid of udids) {
-    const info: DeviceInfo = { udid, name: '', productVersion: '', productType: '', paired: false };
+    const info: DeviceInfo = {
+      udid, name: '', productVersion: '', productType: '', paired: false,
+      soc: 'unknown', socLabel: socLabel('unknown'),
+    };
     if (st.tools.ideviceinfo) {
       const r = await run(st.tools.ideviceinfo, ['-u', udid, '-s']);
       if (r.code === 0) {
@@ -142,6 +173,9 @@ export async function listDevices(): Promise<DeviceInfo[]> {
       const r = await run(st.tools.idevicepair, ['-u', udid, 'validate']);
       info.paired = r.code === 0;
     }
+    // Identify the chip from the model.
+    info.soc = classifySoc(info.productType);
+    info.socLabel = socLabel(info.soc);
     devices.push(info);
   }
   return devices;
@@ -154,12 +188,53 @@ function matchKey(text: string, key: string): string {
   return m ? m[1].trim() : '';
 }
 
-export async function pair(udid: string): Promise<{ ok: boolean; message: string }> {
+/**
+ * Outcome of a pairing attempt. `pending_trust` means idevicepair reached the
+ * device and iOS is now showing (or should show) the Trust dialog — the user
+ * must tap "Trust" and enter the passcode, then pair again. The other codes map
+ * to the actionable failure the UI should explain.
+ */
+export type PairCode =
+  | 'success'
+  | 'pending_trust'
+  | 'passcode'
+  | 'no_device'
+  | 'error';
+
+export interface PairResult {
+  ok: boolean;
+  code: PairCode;
+  message: string;
+}
+
+function classifyPairOutput(out: string, exitCode: number): PairCode {
+  if (exitCode === 0 || /SUCCESS/i.test(out)) return 'success';
+  // iOS wants the user to accept the on-screen Trust dialog first.
+  if (/trust dialog|accept the trust|then attempt to pair|user denied/i.test(out)) return 'pending_trust';
+  // Device is locked / needs its passcode confirmed before it will pair.
+  if (/passcode|enter the passcode|device is locked|please unlock/i.test(out)) return 'passcode';
+  if (/no device|could not connect|device not found|not connected/i.test(out)) return 'no_device';
+  return 'error';
+}
+
+/**
+ * Returns whether this host already has a valid pairing record the device
+ * trusts (`idevicepair validate` succeeds only when paired AND trusted).
+ */
+export async function validatePairing(udid: string): Promise<boolean> {
   const st = checkTools();
-  if (!st.tools.idevicepair) return { ok: false, message: 'idevicepair not found' };
+  if (!st.tools.idevicepair) return false;
+  const r = await run(st.tools.idevicepair, ['-u', udid, 'validate'], 15000);
+  return r.code === 0;
+}
+
+export async function pair(udid: string): Promise<PairResult> {
+  const st = checkTools();
+  if (!st.tools.idevicepair) return { ok: false, code: 'error', message: 'idevicepair not found' };
   const r = await run(st.tools.idevicepair, ['-u', udid, 'pair'], 60000);
   const out = (r.stdout + r.stderr).trim();
-  return { ok: r.code === 0 || /SUCCESS/i.test(out), message: out };
+  const code = classifyPairOutput(out, r.code);
+  return { ok: code === 'success', code, message: out };
 }
 
 // ── Encrypted backup ─────────────────────────────────────────────────────────
@@ -197,6 +272,28 @@ export function startEncryptedBackup(opts: {
 
   const promise = (async () => {
     if (!st.tools.idevicebackup2) throw new Error('LIBIMOBILEDEVICE_MISSING');
+
+    // Step 0: make sure the host is actually paired + trusted. Without this the
+    // backup just exits 255 ("tap Trust") with nothing having prompted the user.
+    // The Trust dialog only ever appears during pairing, so we surface a clear,
+    // actionable error here instead of running a doomed backup.
+    events.onProgress(1, 'Checking device trust…');
+    if (!(await validatePairing(udid))) {
+      const p = await pair(udid);
+      if (!p.ok) {
+        if (p.code === 'pending_trust') {
+          throw new Error('TRUST_REQUIRED: Unlock your device and tap "Trust" (then enter its passcode), then start the backup again.');
+        }
+        if (p.code === 'passcode') {
+          throw new Error('PASSCODE_REQUIRED: Unlock your device and confirm on its screen, then start the backup again.');
+        }
+        if (p.code === 'no_device') {
+          throw new Error('NO_DEVICE: The device is no longer connected. Reconnect it with a data cable and try again.');
+        }
+        throw new Error(`PAIR_FAILED: ${p.message || 'Could not pair with the device.'}`);
+      }
+    }
+
     fs.mkdirSync(targetDir, { recursive: true });
 
     // Step 1: force encryption ON (so the backup always includes the keychain).
@@ -265,7 +362,18 @@ export function startEncryptedBackup(opts: {
           events.onProgress(100, 'Backup complete.');
           resolve({ success: true, backupPath, message: 'Backup complete (channel closed at end).' });
         } else {
-          reject(new Error(`idevicebackup2 exited with code ${code}. Make sure the device is unlocked and you tapped "Trust".`));
+          // We already validated pairing before starting, so a failure here is
+          // usually the device being locked/disconnected mid-backup rather than
+          // a missing Trust. Re-check so the message points at the real cause.
+          validatePairing(udid).then((stillTrusted) => {
+            if (!stillTrusted) {
+              reject(new Error(`idevicebackup2 exited with code ${code}. The device trust was lost — reconnect it, unlock it, and tap "Trust", then try again.`));
+            } else {
+              reject(new Error(`idevicebackup2 exited with code ${code}. Keep the device unlocked and connected for the whole backup, then try again.`));
+            }
+          }).catch(() => {
+            reject(new Error(`idevicebackup2 exited with code ${code}. Keep the device unlocked and connected, then try again.`));
+          });
         }
       });
     });

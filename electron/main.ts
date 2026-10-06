@@ -6,6 +6,7 @@ const fs = require('fs');
 
 import { EngineClient } from './engine';
 import * as imobile from './imobile';
+import * as afc from './afc';
 
 const isDev = !app.isPackaged;
 const LOG_PATH = path.join(os.tmpdir(), 'osfed-engine.log');
@@ -13,6 +14,7 @@ const LOG_PATH = path.join(os.tmpdir(), 'osfed-engine.log');
 let mainWindow: any = null;
 let engine: EngineClient | null = null;
 let runningBackup: imobile.RunningBackup | null = null;
+let runningPull: afc.RunningPull | null = null;
 
 function enginePath(): string {
   const exe = process.platform === 'win32' ? 'osfed-engine.exe' : 'osfed-engine';
@@ -54,6 +56,42 @@ function createWindow(): void {
   }
 
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+// ── device watcher ─────────────────────────────────────────────────────────────
+// Polls the connected UDID set with a cheap `idevice_id -l` and notifies the
+// renderer only when it changes, so plugging/unplugging a phone refreshes the UI
+// automatically with no manual Refresh. libimobiledevice has no cross-platform
+// hotplug event we can rely on from the CLI tools, so a light poll is the robust
+// portable approach.
+let deviceWatchTimer: ReturnType<typeof setInterval> | null = null;
+let lastUdidKey = '\u0000'; // sentinel so the first real scan always fires once
+
+function startDeviceWatcher(): void {
+  if (deviceWatchTimer) return;
+  let busy = false;
+  const tick = async () => {
+    if (busy || !mainWindow) return;
+    busy = true;
+    try {
+      const udids = await imobile.listUdids();
+      const key = udids.slice().sort().join(',');
+      if (key !== lastUdidKey) {
+        lastUdidKey = key;
+        mainWindow?.webContents.send('imobile:devicesChanged');
+      }
+    } catch {
+      // ignore transient errors; the next tick retries
+    } finally {
+      busy = false;
+    }
+  };
+  deviceWatchTimer = setInterval(tick, 2000);
+  void tick();
+}
+
+function stopDeviceWatcher(): void {
+  if (deviceWatchTimer) { clearInterval(deviceWatchTimer); deviceWatchTimer = null; }
 }
 
 // ── IPC: engine ──────────────────────────────────────────────────────────────
@@ -109,6 +147,36 @@ ipcMain.handle('imobile:cancelBackup', async () => {
   return { success: true };
 });
 
+// ── IPC: AFC advanced-logical (camera roll / media) ─────────────────────────────
+
+ipcMain.handle('afc:status', async () => afc.afcStatus());
+
+ipcMain.handle('afc:defaultMediaTarget', async (_e: any, udid: string) => afc.defaultMediaTarget(udid));
+
+ipcMain.handle('afc:pullDCIM', async (_e: any, args: { udid: string; destDir: string }) => {
+  try {
+    runningPull = afc.pullDCIM({
+      udid: args.udid,
+      destDir: args.destDir,
+      events: {
+        onLog: (line) => mainWindow?.webContents.send('afc:event', { kind: 'log', line }),
+        onProgress: (pct, status) => mainWindow?.webContents.send('afc:event', { kind: 'progress', pct, status }),
+      },
+    });
+    const result = await runningPull.promise;
+    runningPull = null;
+    return { success: result.success, data: result };
+  } catch (err: any) {
+    runningPull = null;
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('afc:cancelPull', async () => {
+  runningPull?.cancel();
+  return { success: true };
+});
+
 // ── IPC: dialogs / shell ───────────────────────────────────────────────────────
 
 ipcMain.handle('dialog:selectFolder', async () => {
@@ -143,6 +211,7 @@ ipcMain.handle('app:paths', async () => ({
 app.whenReady().then(async () => {
   await startEngine().catch((e) => console.error('[osfed] engine start failed:', e));
   createWindow();
+  startDeviceWatcher();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -154,6 +223,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  stopDeviceWatcher();
   runningBackup?.cancel();
+  runningPull?.cancel();
   engine?.stop();
 });

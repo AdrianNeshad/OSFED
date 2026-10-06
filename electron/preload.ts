@@ -25,6 +25,22 @@ const api = {
     ipcRenderer.on('imobile:backupEvent', listener);
     return () => ipcRenderer.removeListener('imobile:backupEvent', listener);
   },
+  onDevicesChanged: (cb: () => void): Unsub => {
+    const listener = () => cb();
+    ipcRenderer.on('imobile:devicesChanged', listener);
+    return () => ipcRenderer.removeListener('imobile:devicesChanged', listener);
+  },
+
+  // AFC advanced-logical (camera roll / media)
+  afcStatus: () => ipcRenderer.invoke('afc:status'),
+  afcDefaultMediaTarget: (udid: string) => ipcRenderer.invoke('afc:defaultMediaTarget', udid),
+  pullDCIM: (args: { udid: string; destDir: string }) => ipcRenderer.invoke('afc:pullDCIM', args),
+  cancelPull: () => ipcRenderer.invoke('afc:cancelPull'),
+  onAfcEvent: (cb: (ev: any) => void): Unsub => {
+    const listener = (_e: any, ev: any) => cb(ev);
+    ipcRenderer.on('afc:event', listener);
+    return () => ipcRenderer.removeListener('afc:event', listener);
+  },
 
   // dialogs / shell / paths
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),

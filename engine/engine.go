@@ -39,6 +39,8 @@ func (e *Engine) handlers() map[string]handlerFunc {
 		"list_files":        e.listFiles,
 		"restore_domain":    e.restoreDomain,
 		"export_file":       e.exportFile,
+		"export_to_temp":    e.exportToTemp,
+		"get_photo_thumb":   e.getPhotoThumb,
 		"dump_keychain":     e.dumpKeychain,
 
 		// content extractors
