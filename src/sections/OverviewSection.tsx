@@ -23,6 +23,16 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 export default function OverviewSection({ backup, onNavigate, onClose }: Props) {
+  const isAndroid = backup.platform === 'android';
+  const osLabel = isAndroid ? 'Android' : 'iOS';
+  const subtitle = [
+    backup.productName || backup.productType || `${osLabel} device`,
+    backup.productVersion ? `${osLabel} ${backup.productVersion}` : '',
+  ].filter(Boolean).join(' · ');
+  const osVersion = backup.productVersion
+    ? `${backup.productVersion}${backup.buildVersion ? ` (${backup.buildVersion})` : ''}`
+    : '';
+
   const stats: { id: SectionId; label: string; value: number | string; icon: any }[] = [
     { id: 'files', label: 'Files', value: backup.fileCount.toLocaleString(), icon: FileText },
     { id: 'files', label: 'Domains', value: backup.domainCount, icon: Database },
@@ -40,7 +50,7 @@ export default function OverviewSection({ backup, onNavigate, onClose }: Props) 
       <div className="max-w-4xl mx-auto px-8 py-8">
         <SectionHeader
           title={backup.deviceName || backup.name}
-          subtitle={`${backup.productName || backup.productType} · iOS ${backup.productVersion}`}
+          subtitle={subtitle}
           actions={
             <>
               <Button variant="ghost" onClick={() => window.osfed.openPath(backup.path)}>
@@ -54,7 +64,9 @@ export default function OverviewSection({ backup, onNavigate, onClose }: Props) 
         />
 
         <div className="mb-6">
-          {backup.encrypted ? (
+          {isAndroid ? (
+            <Badge tone="default"><ShieldCheck size={12} className="mr-1" /> Android extraction · read-only{backup.encrypted ? ' · encrypted' : ''}</Badge>
+          ) : backup.encrypted ? (
             <Badge tone="success"><ShieldCheck size={12} className="mr-1" /> Encrypted — keychain available</Badge>
           ) : (
             <Badge tone="warning"><ShieldAlert size={12} className="mr-1" /> Unencrypted — no keychain</Badge>
@@ -105,13 +117,13 @@ export default function OverviewSection({ backup, onNavigate, onClose }: Props) 
           </div>
           <Row label="Device name" value={backup.deviceName} />
           <Row label="Model" value={backup.productType} />
-          <Row label="iOS version" value={`${backup.productVersion} (${backup.buildVersion})`} />
+          <Row label={`${osLabel} version`} value={osVersion} />
           <Row label="Serial number" value={backup.serialNumber} />
-          <Row label="UDID" value={backup.uniqueId} />
+          <Row label={isAndroid ? 'Android ID' : 'UDID'} value={backup.uniqueId} />
           <Row label="IMEI" value={backup.imei} />
           <Row label="Phone number" value={backup.phoneNumber} />
           <Row label="Last backup" value={backup.lastBackupDate ? new Date(backup.lastBackupDate).toLocaleString() : ''} />
-          <Row label="Backup path" value={backup.path} />
+          <Row label={isAndroid ? 'Source path' : 'Backup path'} value={backup.path} />
         </Card>
       </div>
     </div>

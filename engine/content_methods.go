@@ -40,6 +40,9 @@ func (e *Engine) listConversations(raw json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.kind == "android" {
+		return map[string]interface{}{"conversations": []Conversation{}}, nil
+	}
 	db, cleanup, err := openNamedDB(s.mb, "", "Library/SMS/sms.db")
 	if err != nil {
 		return nil, err
@@ -163,6 +166,9 @@ func (e *Engine) getMessages(raw json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.kind == "android" {
+		return map[string]interface{}{"messages": []Message{}, "total": 0, "next_offset": 0}, nil
+	}
 	if p.Limit <= 0 {
 		p.Limit = 500
 	}
@@ -211,6 +217,9 @@ func (e *Engine) listCalls(raw json.RawMessage) (interface{}, error) {
 	s, err := e.sessionFrom(raw)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return map[string]interface{}{"calls": []Call{}}, nil
 	}
 	db, cleanup, err := openNamedDB(s.mb, "", "Library/CallHistoryDB/CallHistory.storedata")
 	if err != nil {
@@ -313,6 +322,9 @@ func (e *Engine) listContacts(raw json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.kind == "android" {
+		return map[string]interface{}{"contacts": []Contact{}}, nil
+	}
 	db, cleanup, err := openNamedDB(s.mb, "", "Library/AddressBook/AddressBook.sqlitedb")
 	if err != nil {
 		return nil, err
@@ -383,6 +395,9 @@ func (e *Engine) listNotes(raw json.RawMessage) (interface{}, error) {
 	s, err := e.sessionFrom(raw)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return map[string]interface{}{"notes": []Note{}}, nil
 	}
 	db, cleanup, err := openNamedDB(s.mb, "", "NoteStore.sqlite")
 	if err != nil {
@@ -492,6 +507,9 @@ func (e *Engine) listBrowserHistory(raw json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.kind == "android" {
+		return map[string]interface{}{"visits": []interface{}{}}, nil
+	}
 	visits := safariVisits(s.mb)
 	return map[string]interface{}{"visits": visits}, nil
 }
@@ -500,6 +518,9 @@ func (e *Engine) hasBrowserHistory(raw json.RawMessage) (interface{}, error) {
 	s, err := e.sessionFrom(raw)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return map[string]interface{}{"has_any": false}, nil
 	}
 	return map[string]interface{}{"has_any": findRecord(s.mb, "", "Library/Safari/History.db") != nil}, nil
 }
@@ -578,6 +599,9 @@ func (e *Engine) listPhotos(raw json.RawMessage) (interface{}, error) {
 	s, err := e.get(p.Handle)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return map[string]interface{}{"photos": []Photo{}, "total": 0}, nil
 	}
 	if p.Limit <= 0 {
 		p.Limit = 100000

@@ -45,6 +45,7 @@ const api = {
   // dialogs / shell / paths
   selectFolder: () => ipcRenderer.invoke('dialog:selectFolder'),
   selectSaveFolder: () => ipcRenderer.invoke('dialog:selectSaveFolder'),
+  selectAbFile: () => ipcRenderer.invoke('dialog:selectAbFile'),
   saveFile: (defaultName: string) => ipcRenderer.invoke('dialog:saveFile', defaultName),
   openPath: (p: string) => ipcRenderer.invoke('shell:openPath', p),
   paths: () => ipcRenderer.invoke('app:paths'),

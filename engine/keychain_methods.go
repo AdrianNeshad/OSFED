@@ -387,6 +387,9 @@ func (e *Engine) dumpKeychain(raw json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.kind == "android" {
+		return e.androidDumpKeychain(s)
+	}
 	if !s.encrypted {
 		return nil, fmt.Errorf("KEYCHAIN_UNAVAILABLE: the keychain is only present in encrypted backups")
 	}

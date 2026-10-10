@@ -189,6 +189,17 @@ ipcMain.handle('dialog:selectSaveFolder', async () => {
   return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0];
 });
 
+ipcMain.handle('dialog:selectAbFile', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Android backup', extensions: ['ab'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  });
+  return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0];
+});
+
 ipcMain.handle('dialog:saveFile', async (_e: any, defaultName: string) => {
   const r = await dialog.showSaveDialog(mainWindow, { defaultPath: defaultName || 'file' });
   return r.canceled || !r.filePath ? null : r.filePath;

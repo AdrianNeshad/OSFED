@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Smartphone, HardDriveDownload, FolderOpen, RefreshCw, ShieldCheck,
   AlertTriangle, Wand2, Lock, CheckCircle2, XCircle, FolderSearch, Cpu, Images,
+  FileArchive,
 } from 'lucide-react';
 import { Button, Card, Spinner, Badge, formatBytes } from '../components/ui';
 import { engineCall } from '../lib/ipc';
@@ -213,8 +214,10 @@ export default function StartSection({ onOpened }: Props) {
           <h1 className="text-title font-semibold">Start an extraction</h1>
         </div>
         <p className="text-[13px] text-text-secondary mb-8 ml-12">
-          Connect a device over USB to create a full <span className="text-text-primary font-medium">encrypted</span> backup
-          (required for the keychain), or open a local backup folder you already have.
+          <span className="text-text-primary font-medium">iOS / iPadOS:</span> create a full{' '}
+          <span className="text-text-primary font-medium">encrypted</span> backup over USB (required for the keychain),
+          or open an existing backup folder. <span className="text-text-primary font-medium">Android:</span> open an{' '}
+          <span className="mono">.ab</span> backup or an extracted folder (read-only).
         </p>
 
         {phase !== 'idle' ? (
@@ -264,6 +267,7 @@ export default function StartSection({ onOpened }: Props) {
                 <div className="flex items-center gap-2">
                   <HardDriveDownload size={17} className="text-accent" />
                   <h2 className="text-subhead font-semibold">Create encrypted backup</h2>
+                  <Badge tone="accent">iOS / iPadOS</Badge>
                 </div>
                 <Button variant="ghost" onClick={refreshDevices} disabled={scanning}>
                   <RefreshCw size={14} className={scanning ? 'animate-spin' : ''} /> Refresh
@@ -366,6 +370,9 @@ export default function StartSection({ onOpened }: Props) {
 
             {/* Open existing */}
             <OpenExistingPanel onOpened={onOpened} setError={setError} setPhase={setPhase} />
+
+            {/* Open Android extraction */}
+            <OpenAndroidPanel onOpened={onOpened} setError={setError} setPhase={setPhase} />
           </div>
         )}
       </div>
@@ -480,7 +487,8 @@ function OpenExistingPanel({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <FolderOpen size={17} className="text-accent" />
-          <h2 className="text-subhead font-semibold">Open existing backup</h2>
+          <h2 className="text-subhead font-semibold">Open existing iOS backup</h2>
+          <Badge tone="accent">iOS / iPadOS</Badge>
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={() => scan()}><FolderSearch size={14} /> Scan default</Button>
@@ -534,6 +542,106 @@ function OpenExistingPanel({
               {opening ? <Spinner /> : <><CheckCircle2 size={14} /> Unlock</>}
             </Button>
             <Button variant="ghost" onClick={() => setPwFor(null)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── Open Android extraction ──────────────────────────────────────────────────
+//
+// Opens an `adb backup` (.ab) file or an extracted folder via the same
+// open_backup RPC the iOS flow uses. The engine detects the Android source and
+// routes it to the Android reader, so the rest of the app (Files, previews,
+// exports) works unchanged. Encrypted `.ab` files prompt for a password.
+
+function OpenAndroidPanel({
+  onOpened, setError, setPhase,
+}: {
+  onOpened: (i: BackupInfo) => void;
+  setError: (s: string) => void;
+  setPhase: (p: Phase) => void;
+}) {
+  const [chosen, setChosen] = useState<{ path: string; label: string } | null>(null);
+  const [pw, setPw] = useState('');
+  const [needPw, setNeedPw] = useState(false);
+  const [opening, setOpening] = useState(false);
+
+  const basename = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || p;
+
+  const openSource = async (path: string, label: string, password?: string) => {
+    setError('');
+    setOpening(true);
+    setPhase('opening');
+    try {
+      const info = await engineCall<BackupInfo>('open_backup', { path, password: password || '' });
+      onOpened(info);
+    } catch (e: any) {
+      const msg = e.message || String(e);
+      if (msg.includes('PASSWORD_REQUIRED') || msg.includes('WRONG_PASSWORD')) {
+        setChosen({ path, label });
+        setNeedPw(true);
+        if (msg.includes('WRONG_PASSWORD')) setError('Wrong backup password.');
+      } else {
+        setError(msg);
+      }
+      setPhase('idle');
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  const chooseFile = async () => {
+    const p = await window.osfed.selectAbFile();
+    if (p) { setNeedPw(false); setPw(''); openSource(p, basename(p)); }
+  };
+  const chooseFolder = async () => {
+    const p = await window.osfed.selectFolder();
+    if (p) { setNeedPw(false); setPw(''); openSource(p, basename(p)); }
+  };
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <FileArchive size={17} className="text-accent" />
+          <h2 className="text-subhead font-semibold">Open Android extraction</h2>
+          <Badge tone="accent">Android</Badge>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={chooseFile}><FileArchive size={14} /> Choose .ab file…</Button>
+          <Button variant="ghost" onClick={chooseFolder}><FolderOpen size={14} /> Choose folder…</Button>
+        </div>
+      </div>
+
+      <div className="text-[13px] text-text-secondary">
+        Open an <span className="text-text-primary font-medium">adb backup</span> (<span className="mono">.ab</span>) file,
+        or a folder pulled from a device (e.g. a <span className="mono">/sdcard</span> tree). Read-only — nothing is written to any device.
+      </div>
+      <div className="text-caption text-text-tertiary mt-2">
+        Without root, Android does not expose protected secrets (Keystore, app passwords), so the Keychain tab stays empty for Android sources.
+      </div>
+
+      {needPw && chosen && (
+        <div className="mt-4 p-4 rounded-md bg-base border border-border-default">
+          <div className="text-[13px] font-medium mb-2 flex items-center gap-2">
+            <Lock size={14} className="text-accent" /> Password for “{chosen.label}”
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              autoFocus
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && openSource(chosen.path, chosen.label, pw)}
+              placeholder="Backup password"
+              className="mono flex-1 bg-elevated border border-border-default rounded-md px-3 py-2 text-[13px] focus:outline-none focus:border-accent"
+            />
+            <Button variant="primary" onClick={() => openSource(chosen.path, chosen.label, pw)} disabled={opening || !pw}>
+              {opening ? <Spinner /> : <><CheckCircle2 size={14} /> Unlock</>}
+            </Button>
+            <Button variant="ghost" onClick={() => { setNeedPw(false); setChosen(null); }}>Cancel</Button>
           </div>
         </div>
       )}

@@ -111,6 +111,7 @@ func summarize(dir string) map[string]interface{} {
 	return map[string]interface{}{
 		"path":           dir,
 		"name":           filepath.Base(dir),
+		"platform":       "ios",
 		"deviceName":     deviceName,
 		"displayName":    pstr(info, "Display Name"),
 		"productName":    pstr(info, "Product Name"),
@@ -183,12 +184,28 @@ func (e *Engine) openBackup(raw json.RawMessage) (interface{}, error) {
 		return nil, fmt.Errorf("path is required")
 	}
 
+	// Android source: an `.ab` file, or a directory that is not an iOS backup.
+	if isAndroidSource(p.Path) {
+		ab, err := openAndroidBackup(p.Path, p.Password)
+		if err != nil {
+			return nil, err
+		}
+		s := &session{path: p.Path, kind: "android", ab: ab, encrypted: ab.encrypted, loaded: true}
+		handle := e.newHandle(s)
+		info := androidSummary(ab)
+		info["handle"] = handle
+		info["fileCount"] = len(ab.entries)
+		info["domainCount"] = len(ab.domains())
+		info["appCount"] = androidAppCount(ab)
+		return info, nil
+	}
+
 	mb, err := backup.OpenDir(p.Path)
 	if err != nil {
 		return nil, fmt.Errorf("could not open backup: %w", err)
 	}
 
-	s := &session{path: p.Path, mb: mb, encrypted: mb.Manifest.IsEncrypted}
+	s := &session{path: p.Path, kind: "ios", mb: mb, encrypted: mb.Manifest.IsEncrypted}
 
 	if mb.Manifest.IsEncrypted {
 		if p.Password == "" {
@@ -220,6 +237,9 @@ func (e *Engine) closeBackup(raw json.RawMessage) (interface{}, error) {
 	if err := decode(raw, &p); err != nil {
 		return nil, err
 	}
+	if s, err := e.get(p.Handle); err == nil && s.ab != nil {
+		s.ab.close() // remove the temp tar for an `.ab` source
+	}
 	e.drop(p.Handle)
 	return map[string]interface{}{"closed": true}, nil
 }
@@ -236,6 +256,9 @@ func (e *Engine) backupInfo(raw json.RawMessage) (interface{}, error) {
 	s, err := e.get(p.Handle)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return e.androidBackupInfo(s)
 	}
 	info := summarize(s.path)
 	info["handle"] = s.handle
@@ -264,6 +287,9 @@ func (e *Engine) listDomains(raw json.RawMessage) (interface{}, error) {
 	s, err := e.get(p.Handle)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return e.androidListDomains(s)
 	}
 
 	counts := map[string]int{}
@@ -300,6 +326,9 @@ func (e *Engine) listFiles(raw json.RawMessage) (interface{}, error) {
 	s, err := e.get(p.Handle)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return e.androidListFiles(s, p)
 	}
 	if p.Limit <= 0 {
 		p.Limit = 5000
@@ -348,6 +377,9 @@ func (e *Engine) exportFile(raw json.RawMessage) (interface{}, error) {
 	s, err := e.get(p.Handle)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return e.androidExportFile(s, p)
 	}
 	if p.Dest == "" {
 		return nil, fmt.Errorf("dest is required")
@@ -405,6 +437,9 @@ func (e *Engine) restoreDomain(raw json.RawMessage) (interface{}, error) {
 	s, err := e.get(p.Handle)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return e.androidRestoreDomain(s, p)
 	}
 	if p.Dest == "" {
 		return nil, fmt.Errorf("dest is required")

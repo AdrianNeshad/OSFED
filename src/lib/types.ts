@@ -1,6 +1,10 @@
 export interface BackupSummary {
   path: string;
   name: string;
+  /** Source platform: "ios" (libimobiledevice backup) or "android" (.ab / folder). */
+  platform?: 'ios' | 'android';
+  /** Android source shape: "ab" (adb backup file) or "dir" (extracted folder). */
+  sourceKind?: string;
   deviceName: string;
   displayName: string;
   productName: string;

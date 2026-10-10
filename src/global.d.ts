@@ -66,6 +66,7 @@ export interface OsfedApi {
 
   selectFolder: () => Promise<string | null>;
   selectSaveFolder: () => Promise<string | null>;
+  selectAbFile: () => Promise<string | null>;
   saveFile: (defaultName: string) => Promise<string | null>;
   openPath: (p: string) => Promise<string>;
   paths: () => Promise<{ home: string; defaultBackupRoot: string }>;

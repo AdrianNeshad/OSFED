@@ -83,6 +83,14 @@ func (e *Engine) timeline(raw json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.kind == "android" {
+		return map[string]interface{}{
+			"entries":  []TimelineEntry{},
+			"counts":   map[string]int{"message": 0, "call": 0, "photo": 0, "note": 0, "browser": 0},
+			"contacts": []interface{}{},
+			"total":    0,
+		}, nil
+	}
 	if p.Limit <= 0 {
 		p.Limit = 20000
 	}

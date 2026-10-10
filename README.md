@@ -2,7 +2,8 @@
 
 A cross-platform (Windows / macOS / Linux) GUI
 for reading iPhone/iPad extractions, either from an existing local backup folder or by
-creating a fresh **encrypted** backup over a USB cable.
+creating a fresh **encrypted** backup over a USB cable. It also reads **Android**
+acquisitions — an `adb backup` (`.ab`) file or an extracted folder — in the same app.
 
 OSFED always creates *encrypted* backups, because the iOS keychain is only present in an
 encrypted backup. Exploring the keychain is a first-class feature.
@@ -34,6 +35,10 @@ encrypted backup. Exploring the keychain is a first-class feature.
   still open in one click.
 - **File Browser** — browse every file by domain, **open** any file in the OS viewer, and
   restore a domain (or the whole backup) to a folder.
+- **Android (read-only)** — open an `adb backup` (`.ab`) file (decrypting it when a password
+  is set) or an extracted folder, then browse, preview and export through the same Files view.
+  No root: Android's protected secrets (Keystore, app passwords) are not exposed, so the
+  Keychain tab stays empty for Android sources.
 
 ## Architecture
 

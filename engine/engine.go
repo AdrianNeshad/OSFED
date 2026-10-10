@@ -8,11 +8,15 @@ import (
 	"github.com/dunhamsteve/ios/backup"
 )
 
-// session holds one opened (and possibly decrypted + loaded) backup.
+// session holds one opened data source. It is either an iOS backup (mb) or an
+// Android extraction (ab); kind says which so the shared RPC methods dispatch
+// to the right reader.
 type session struct {
 	handle    string
 	path      string
+	kind      string // "ios" | "android"
 	mb        *backup.MobileBackup
+	ab        *androidBackup
 	encrypted bool
 	loaded    bool
 }

@@ -5,6 +5,7 @@ go 1.23
 require (
 	github.com/dunhamsteve/ios v0.0.0
 	github.com/dunhamsteve/plist v0.0.0-20211213035615-a528b51ff82f
+	golang.org/x/crypto v0.0.0-20221010152910-d6f0a8c073c2
 	modernc.org/sqlite v1.34.1
 )
 
@@ -15,7 +16,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/crypto v0.0.0-20221010152910-d6f0a8c073c2 // indirect
 	golang.org/x/sys v0.22.0 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.55.3 // indirect

@@ -66,6 +66,9 @@ func (e *Engine) exportToTemp(raw json.RawMessage) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.kind == "android" {
+		return e.androidExportToTemp(s, p)
+	}
 	rec := recordByRef(s, p.ID, p.Domain, p.Path)
 	if rec == nil {
 		return nil, fmt.Errorf("file not found")
@@ -112,6 +115,9 @@ func (e *Engine) getPhotoThumb(raw json.RawMessage) (interface{}, error) {
 	s, err := e.get(p.Handle)
 	if err != nil {
 		return nil, err
+	}
+	if s.kind == "android" {
+		return e.androidGetPhotoThumb(s, p)
 	}
 	rec := recordByRef(s, p.ID, p.Domain, p.Path)
 	if rec == nil {
